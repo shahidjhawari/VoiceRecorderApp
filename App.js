@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Button, View, Text, PermissionsAndroid, Alert, Platform } from 'react-native';
 import AudioRecorderPlayer from 'react-native-audio-recorder-player';
 import RNFetchBlob from 'react-native-blob-util';
-import { mkdir } from 'react-native-fs'; // Import mkdir from react-native-fs
 
 const App = () => {
   const [recording, setRecording] = useState(false);
@@ -32,24 +31,28 @@ const App = () => {
 
   const startRecording = async () => {
     try {
-      // Define the directory and file path
       const audioDir = Platform.OS === 'android'
         ? RNFetchBlob.fs.dirs.DownloadDir + '/VoiceRecorder'
         : RNFetchBlob.fs.dirs.DocumentDir + '/VoiceRecorder';
-
+  
+      // Check if the directory already exists
+      const dirExists = await RNFetchBlob.fs.exists(audioDir);
+  
+      // Create the directory if it doesn't exist
+      if (!dirExists) {
+        await RNFetchBlob.fs.mkdir(audioDir);
+      }
+  
       const audioPath = audioDir + '/recorded_audio.mp4';
-
-      // Ensure the directory exists
-      await mkdir(audioDir, { recursive: true });
-
+  
       setRecording(true);
-
+  
       // Start recording
       await audioRecorderPlayer.startRecorder(audioPath);
       audioRecorderPlayer.addRecordBackListener((e) => {
         console.log('Recording:', e.currentPosition);
       });
-
+  
       // Stop recording after 10 seconds
       setTimeout(() => {
         stopRecording(audioPath);
@@ -75,16 +78,14 @@ const App = () => {
 
   const uploadAudio = async (audioPath) => {
     try {
-      const formData = new FormData();
-      formData.append('audio', {
-        uri: audioPath,
-        type: 'audio/mp4',
-        name: 'recorded_audio.mp4',
-      });
+      // Read the file as a base64 string
+      const fileBase64 = await RNFetchBlob.fs.readFile(audioPath, 'base64');
+      const fileUri = `data:audio/mp4;base64,${fileBase64}`;
 
+      // Upload the file to the backend
       const response = await RNFetchBlob.fetch(
         'POST',
-        'http://192.168.100.100:3000/upload',
+        'https://voice-recorder-app-backend.vercel.app/upload',
         {
           'Content-Type': 'multipart/form-data',
         },
@@ -92,13 +93,15 @@ const App = () => {
           {
             name: 'audio',
             filename: 'recorded_audio.mp4',
-            data: RNFetchBlob.wrap(audioPath),
+            type: 'audio/mp4',
+            data: fileBase64,
           },
         ]
       );
 
       if (response.info().status === 200) {
-        Alert.alert('Recording uploaded successfully.');
+        const result = response.json();
+        Alert.alert('Recording uploaded successfully.', `URL: ${result.url}`);
       } else {
         Alert.alert('Failed to upload recording.');
       }
